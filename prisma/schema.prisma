@@ -1,0 +1,299 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum Role {
+  USER
+  COACH
+  ADMIN
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  UNKNOWN
+}
+
+enum LessonCategory {
+  FITNESS
+  YOGA
+  PILATES
+  SWIMMING
+  GOLF
+  TENNIS
+  DANCE
+  MARTIAL_ARTS
+  OTHER
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  ATTENDED
+  NO_SHOW
+  CANCELED
+  HOLIDAY
+}
+
+enum Goal {
+  EASY
+  NORMAL
+  HARD
+}
+
+enum MembershipReason {
+  ALLOCATE
+  BOOKING
+  CANCEL_REFUND
+  ADJUST
+}
+
+enum TicketStatus {
+  OPEN
+  CLOSED
+}
+
+// Models
+model User {
+  id           String       @id @default(uuid())
+  username     String       @unique
+  passwordHash String       @map("password_hash")
+  role         Role         @default(USER)
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  profile      UserProfile?
+  reservations Reservation[]
+  memberships  Membership[]
+  tickets      Ticket[]
+  ledgerEntries MembershipLedger[] @relation("CreatedBy")
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+model UserProfile {
+  userId      String   @id @map("user_id")
+  name        String
+  gender      Gender   @default(UNKNOWN)
+  birthdate   DateTime? @db.Date
+  phone       String?
+  avatarUrl   String?  @map("avatar_url")
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_profiles")
+}
+
+model Branch {
+  id          String   @id @default(uuid())
+  name        String
+  address     String
+  description String?
+  thumbnailUrl String? @map("thumbnail_url")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  coaches     CoachBranch[]
+  lessons     Lesson[]
+  reservations Reservation[]
+
+  @@map("branches")
+}
+
+model Coach {
+  id          String       @id @default(uuid())
+  userId      String?      @unique @map("user_id")
+  name        String
+  phone       String?
+  bio         String?
+  careerText  String?      @map("career_text")
+  birthdate   DateTime?    @db.Date
+  gender      Gender       @default(UNKNOWN)
+  profileUrl  String?      @map("profile_url")
+
+  branches    CoachBranch[]
+  lessons     Lesson[]
+  availRules  CoachAvailRule[]
+  timeOffs    CoachTimeOff[]
+  reservations Reservation[]
+  memberships Membership[]
+  feedbacks   CoachFeedback[]
+
+  @@map("coaches")
+}
+
+model CoachBranch {
+  coachId  String @map("coach_id")
+  branchId String @map("branch_id")
+
+  coach    Coach  @relation(fields: [coachId], references: [id], onDelete: Cascade)
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([coachId, branchId])
+  @@map("coach_branches")
+}
+
+model Lesson {
+  id          String         @id @default(uuid())
+  category    LessonCategory
+  name        String
+  description String?
+  coachId     String         @map("coach_id")
+  branchId    String         @map("branch_id")
+  thumbnailUrl String?       @map("thumbnail_url")
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  coach       Coach          @relation(fields: [coachId], references: [id])
+  branch      Branch         @relation(fields: [branchId], references: [id])
+  reservations Reservation[]
+
+  @@index([coachId])
+  @@index([branchId])
+  @@map("lessons")
+}
+
+model CoachAvailRule {
+  id        String   @id @default(uuid())
+  coachId   String   @map("coach_id")
+  weekday   Int      // 0=Sunday, 6=Saturday
+  startTime DateTime @db.Time @map("start_time")
+  endTime   DateTime @db.Time @map("end_time")
+
+  coach     Coach    @relation(fields: [coachId], references: [id], onDelete: Cascade)
+
+  @@unique([coachId, weekday])
+  @@map("coach_avail_rules")
+}
+
+model CoachTimeOff {
+  id      String   @id @default(uuid())
+  coachId String   @map("coach_id")
+  startAt DateTime @map("start_at")
+  endAt   DateTime @map("end_at")
+  reason  String?
+
+  coach   Coach    @relation(fields: [coachId], references: [id], onDelete: Cascade)
+
+  @@index([coachId, startAt, endAt])
+  @@map("coach_time_off")
+}
+
+model Reservation {
+  id          String            @id @default(uuid())
+  lessonId    String            @map("lesson_id")
+  userId      String            @map("user_id")
+  coachId     String            @map("coach_id")
+  branchId    String            @map("branch_id")
+  startAt     DateTime          @map("start_at")
+  endAt       DateTime          @map("end_at")
+  status      ReservationStatus @default(CONFIRMED)
+  goal        Goal?
+  categoryTag String?           @map("category_tag")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  canceledAt  DateTime?         @map("canceled_at")
+
+  lesson      Lesson            @relation(fields: [lessonId], references: [id])
+  user        User              @relation(fields: [userId], references: [id])
+  coach       Coach             @relation(fields: [coachId], references: [id])
+  branch      Branch            @relation(fields: [branchId], references: [id])
+  ledgerEntries MembershipLedger[]
+  feedback    CoachFeedback?
+
+  @@index([coachId, startAt])
+  @@index([userId, status])
+  @@map("reservations")
+}
+
+model Membership {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  coachId         String   @map("coach_id")
+  remainingMinutes Int     @map("remaining_minutes")
+  expiresAt       DateTime @db.Date @map("expires_at")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  user            User     @relation(fields: [userId], references: [id])
+  coach           Coach    @relation(fields: [coachId], references: [id])
+  ledgerEntries   MembershipLedger[]
+
+  @@unique([userId, coachId])
+  @@index([userId, active])
+  @@map("memberships")
+}
+
+model MembershipLedger {
+  id             String           @id @default(uuid())
+  membershipId   String           @map("membership_id")
+  deltaMinutes   Int              @map("delta_minutes")
+  reason         MembershipReason
+  reservationId  String?          @map("reservation_id")
+  createdByUserId String          @map("created_by_user_id")
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  membership     Membership       @relation(fields: [membershipId], references: [id])
+  reservation    Reservation?     @relation(fields: [reservationId], references: [id])
+  createdBy      User            @relation("CreatedBy", fields: [createdByUserId], references: [id])
+
+  @@index([membershipId, createdAt])
+  @@map("membership_ledger")
+}
+
+model CoachFeedback {
+  reservationId String   @id @map("reservation_id")
+  coachId       String   @map("coach_id")
+  content       String   @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+  coach         Coach      @relation(fields: [coachId], references: [id])
+
+  @@map("coach_feedback")
+}
+
+model Announcement {
+  id          String    @id @default(uuid())
+  title       String
+  body        String    @db.Text
+  publishedAt DateTime? @map("published_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([publishedAt])
+  @@map("announcements")
+}
+
+model Ticket {
+  id        String       @id @default(uuid())
+  userId    String       @map("user_id")
+  title     String
+  body      String       @db.Text
+  status    TicketStatus @default(OPEN)
+  createdAt DateTime     @default(now()) @map("created_at")
+  closedAt  DateTime?    @map("closed_at")
+
+  user      User         @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@map("tickets")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorUserId String  @map("actor_user_id")
+  action     String
+  entity     String
+  entityId   String   @map("entity_id")
+  payload    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  actor      User     @relation(fields: [actorUserId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([actorUserId, createdAt])
+  @@map("audit_logs")
+}
